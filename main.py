@@ -3,6 +3,8 @@ import docker
 import argparse
 import json
 import logging
+import string
+
 
 from python_terraform import *
 
@@ -10,15 +12,34 @@ from python_terraform import *
 logging.basicConfig(filename="prod_replay_util.log", level=logging.INFO)
 logging.getLogger().addHandler(logging.StreamHandler())
 
-def create_stack() -> None:
+#
+DOCKER_PATH = pathlib.Path().parent.joinpath('nginx-image')
+SERVICE_PATH = pathlib.Path().parent.joinpath('service')
+
+def generate_random_stack_id(alph: str = string.ascii_lowercase, count: int = 5) -> str:
     """
-    Create a new stack from [start_date, end_date) with a given
-    number of threads.
-    :param info: Start Date, End Date, and # of Threads
+
+    :param alph:
+    :param count:
     """
-    logging.info("Creating new ")
-    # Subtract 1 hour (as AWS is funky) to make this work as expected: [Inclusive, Exclusive)
-    
+
+def create_aws_stack() -> None:
+    """
+    Create AWS structure from Terraform unfrastructure
+    :param stack_id: generator random workspace
+    """
+    logging.info("Creating Terraform (this process takes a bit)")
+
+    terraform = Terraform(working_dir=SERVICE_PATH)
+
+    try:
+        terraform.init("init")
+    except FileExistsError:
+        logging.error("Terraform was not found in SERVICE_PATH")
+        return
+
+    terraform.cmd(f"workspace new {}")
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -43,27 +64,63 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def create_images(info: argparse.Namespace) -> None:
+def create_docker_images() -> None:
     """
     Create images
-    :param info: Args
     """
     cwd = pathlib.Path().cwd()
     home_dir = cwd.parent.parent
     client_docker = docker.from_env()
 
-    # Generate the dockerfile
-    # Copy the modules
-    if cwd.joinpath(app).exists():
-        shutil.rmtree(cwd.joinpath(app))
-        shutil.copytree(str(home_dir.joinpath(app)), str(cwd.joinpath(app)))
-        # Build image
+    # Generate docker images
     client_docker.images.build(
         path='.',
-        tag=f"build_{app}:latest"
+        tag=f":latest"
     )
-    # clean up path after
-    shutil.rmtree(str(cwd.joinpath(app)))
+
+def create_terraform() -> None:
+    """
+       Create AWS structure from Terraform infrastructure
+       :param stack_id: Stack name to pass to AWS
+       :return: AWS Object
+       """
+    logging.info("Creating Terraform layout (this may take a while...)")
+
+    terraform = Terraform(working_dir=PREREQ_PATH)  # type: ignore
+
+    try:
+        terraform.cmd("init")
+    except FileNotFoundError:
+        logging.error("Terraform was not found in PATH. Please do so.")
+        sys.exit(1)
+
+    terraform.cmd(f"workspace new {stack_id}")
+    terraform.cmd(f"workspace select {stack_id}")
+    return_code, _, stderr = terraform.cmd(
+        "apply", auto_approve=IsFlagged  # type: ignore
+    )
+
+    logging.info(f"Terraform Exit Code: {return_code}")
+
+    if return_code == 0:
+        logging.info("Prereq stack creation complete.")
+    else:
+        if "ExpiredToken" in stderr:
+            logging.critical(
+                "*** prod-replay-user token expired, please renew and try again ***"
+            )
+        else:
+            logging.critical(
+                "*** Ensure prod-replay-user profile exists and can access QA ***"
+            )
+        sys.exit(1)
+
+    prereq_outputs = terraform.output()
+    return prereq_outputs
+
+
+def upload_to_ecr()
+
 
 
 if __name__ == "__main__":
