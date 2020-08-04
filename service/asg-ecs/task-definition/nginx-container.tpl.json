@@ -1,0 +1,26 @@
+[
+  {
+    "name": "${container_name}",
+    "image": "${image}",
+    "cpu": 0,
+    "memory": 50,
+    "essential": true,
+    "command": [],
+    "portMappings": [
+      {
+        "containerPort": 80,
+        "hostPort": 0,
+        "protocol": "tcp"
+      }
+    ],
+    "environment": [
+      {
+        "name": "ENVIRONMENT",
+        "value": "${env}"
+      }
+    ],
+    "resourceRequirements": null,
+    "ulimits": null,
+    "dnsServers": null
+  }
+]
