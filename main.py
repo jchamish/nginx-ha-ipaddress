@@ -1,92 +1,94 @@
 import pathlib
 import docker
 import argparse
-import json
 import logging
-import string
+import jmespath
+import json
+import boto3
+import base64
+import sys
 
 
 from python_terraform import *
 
+from typing import List
+
 # Log to file & stdout
-logging.basicConfig(filename="prod_replay_util.log", level=logging.INFO)
+logging.basicConfig(filename="nginx-system.log", level=logging.INFO)
 logging.getLogger().addHandler(logging.StreamHandler())
 
-#
-DOCKER_PATH = pathlib.Path().parent.joinpath('nginx-image')
-SERVICE_PATH = pathlib.Path().parent.joinpath('service')
-
-def generate_random_stack_id(alph: str = string.ascii_lowercase, count: int = 5) -> str:
-    """
-
-    :param alph:
-    :param count:
-    """
-
-def create_aws_stack() -> None:
-    """
-    Create AWS structure from Terraform unfrastructure
-    :param stack_id: generator random workspace
-    """
-    logging.info("Creating Terraform (this process takes a bit)")
-
-    terraform = Terraform(working_dir=SERVICE_PATH)
-
-    try:
-        terraform.init("init")
-    except FileExistsError:
-        logging.error("Terraform was not found in SERVICE_PATH")
-        return
-
-    terraform.cmd(f"workspace new {}")
+# GLABOLs
+CWD: pathlib.Path = pathlib.Path().expanduser().resolve()
+DOCKER_PATH: pathlib.Path = CWD.joinpath('nginx-image')
+SERVICE_PATH: pathlib.Path = CWD.joinpath('service')
+DOCKER_CLIENT = docker.from_env()
 
 
-def parse_args() -> argparse.Namespace:
-    """
-    Parse input args from the user into system args
-    :return: Namespace of options
-    """
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers()
-
-    # Create images Stack Parser
-    create_docker_images = subparsers.add_parser("createimages")
-    create_docker_images.add_argument(
-        "-i",
-        "--image-di",
-        type=str,
-        choices=['all', 'request_feeder', 'request_worker', 'input_feeder'],
-        required=True
-    )
-
-    create_docker_images.set_defaults(func=create_images)
-
-    return parser.parse_args()
-
-
-def create_docker_images() -> None:
+def create_docker_images_and_push(profile: str, region: str, do_push: bool = False) -> None:
     """
     Create images
     """
-    cwd = pathlib.Path().cwd()
-    home_dir = cwd.parent.parent
-    client_docker = docker.from_env()
-
-    # Generate docker images
-    client_docker.images.build(
-        path='.',
-        tag=f":latest"
+    # Build the current Image
+    logging.info("Building the Docker Container")
+    DOCKER_CLIENT.images.build(
+        path=str(DOCKER_PATH),
+        tag="nginx-container:latest",
+        quiet=False
     )
 
-def create_terraform() -> None:
-    """
-       Create AWS structure from Terraform infrastructure
-       :param stack_id: Stack name to pass to AWS
-       :return: AWS Object
-       """
-    logging.info("Creating Terraform layout (this may take a while...)")
+    # search for a tf state file
+    terraform = [p for p in SERVICE_PATH.rglob("*.tfstate")]
 
-    terraform = Terraform(working_dir=PREREQ_PATH)  # type: ignore
+    if not terraform:
+        logging.info("Can't get repo name form tfstate file")
+        sys.exit(1)
+
+    # load tf state file
+    with terraform[0].open(mode='r') as fp:
+        tf_state_data = json.load(fp)
+
+    # find the repository_url
+    list_of_repository_url: List[str] = jmespath.search(
+            "resources[?type=='aws_ecr_repository'].instances | [0][*].attributes.repository_url",
+            tf_state_data
+        )
+    # check we we're able to get the repo
+    if list_of_repository_url:
+        repository_url: str = list_of_repository_url.pop(0)
+        logging.info(f"info: repo name is {repository_url}")
+
+        # 1) re-tag with epository_url
+        current_image = DOCKER_CLIENT.images.get("nginx-container:latest")
+        current_image.tag(f"{repository_url}:latest")
+
+        # 2) push image to aws
+        if do_push:
+            sesson = boto3.Session(profile_name=profile, region_name=region)
+            ecr_client = sesson.client('ecr')
+
+            token = ecr_client.get_authorization_token()
+
+            registry_auth = token.get('authorizationData')
+            # get auth token for ecr
+            if registry_auth:
+                try:
+                    username, password = base64.b64decode(registry_auth[0]['authorizationToken']).decode().split(':')
+                    repository_name = registry_auth[0]['proxyEndpoint']
+                except IndexError as e:
+                    logging.error(f"Error - {e}")
+
+            # loging and push the image
+            DOCKER_CLIENT.login(username, password, registry=repository_name)
+            DOCKER_CLIENT.images.push(f"{repository_url}:latest")
+
+
+def create_terrafrom(profile: str, region: str) -> None:
+    """
+    Create AWS structure from Terraform infrastructure
+    :return: AWS Object
+    """
+    logging.info("Creating Terraform layout (may take a while...)")
+    terraform = Terraform(working_dir=SERVICE_PATH)
 
     try:
         terraform.cmd("init")
@@ -94,35 +96,111 @@ def create_terraform() -> None:
         logging.error("Terraform was not found in PATH. Please do so.")
         sys.exit(1)
 
-    terraform.cmd(f"workspace new {stack_id}")
-    terraform.cmd(f"workspace select {stack_id}")
+    terraform.cmd(f"workspace new tstack")
+    terraform.cmd(f"workspace select tstack")
     return_code, _, stderr = terraform.cmd(
-        "apply", auto_approve=IsFlagged  # type: ignore
+        "apply",
+        vars=f"profile={profile}",
+        auto_approve=IsFlagged
     )
 
     logging.info(f"Terraform Exit Code: {return_code}")
 
     if return_code == 0:
-        logging.info("Prereq stack creation complete.")
+        logging.info("new stack created")
     else:
         if "ExpiredToken" in stderr:
             logging.critical(
-                "*** prod-replay-user token expired, please renew and try again ***"
+                "***token expired, please renew and try again ***"
             )
         else:
             logging.critical(
-                "*** Ensure prod-replay-user profile exists and can access QA ***"
+                "*** Ensure aws profile exists***"
             )
         sys.exit(1)
 
-    prereq_outputs = terraform.output()
-    return prereq_outputs
+    print(terraform.output())
 
 
-def upload_to_ecr()
+def clean_up(profile: str, region: str) -> None:
+    """
+    remove everything created and docker images
+    :param stack_id: Stack ID to delete
+    """
+    try:
+        terraform = Terraform(working_dir=SERVICE_PATH)
+        terraform.cmd("init")
+        terraform.cmd(f"workspace select tstack")
+    except (TerraformCommandError, KeyError):
+        logging.error("workspace doesn't exist")
+        sys.exit(-1)
 
+    return_code, stdout, stderr = terraform.cmd(
+        "destroy",
+        var={
+                "profile": profile,
+                "region": region
+            },
+        auto_approve=IsFlagged,
+    )
+    logging.info(stdout)
+    logging.error(stderr)
+
+    # docker remove
+    if return_code == 0:
+        logging.info(f"ECS Stack tstack destroy complete")
+    
+
+def parse_args() -> argparse.Namespace:
+    """
+    Parse input args from the user into system args
+    :return: Namespace of options
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-p",
+        "--profile",
+        type=str,
+        required=True,
+        default="default",
+        help="The aws profile you're going to use"
+    )
+    parser.add_argument(
+        "-t",
+        "--type",
+        type=str,
+        default="run",
+        choices=["image"],
+        required=False,
+        help="""options of to do
+            run - will build terraform
+            delete - will destroy stacks and rmi docker images
+            image - will build the image
+        """
+    )
+    parser.add_argument(
+        "-r",
+        "--region",
+        type=str,
+        default="us-east-1",
+        required=False,
+        help="This is the aws region you are using. default is us-east-1"
+    )
+
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
     args =  parse_args()
-    args.func()
+    
+    # simple two state run
+    if args.type == "run":
+        # apply terrafrom
+        create_terrafrom(args.profile, args.region)
+    elif args.type == "image":
+         # build docker image and push to ecr
+        create_docker_images_and_push(args.profile, args.region)
+    elif args.type == "clean":
+        clean_up(args.profile, args.region)
+    else:
+        logging.error("Error - invalid selection")

@@ -13,6 +13,13 @@
         "protocol": "tcp"
       }
     ],
+    "mountPoints": [
+      {
+          "containerPath": "/usr/share/nginx/html",
+          "readOnly": false,
+          "sourceVolume": "shared-website"
+      }
+    ],
     "environment": [
       {
         "name": "ENVIRONMENT",

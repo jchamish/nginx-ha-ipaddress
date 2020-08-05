@@ -10,9 +10,10 @@ resource "aws_alb" "alb_nginx" {
   security_groups = [var.alb_sg]
   subnets         = var.subnets_external
 
-  enable_deletion_protection = true
+  enable_deletion_protection = false
+
   idle_timeout = 300
-  ip_address_type = "dualstack"
+  ip_address_type = "ipv4"
 
   tags = {
     Environment = var.env_val
@@ -35,27 +36,14 @@ resource "aws_alb_target_group" "nginx_tg_http" {
   }
 }
 
-
-resource "aws_alb_listener" "https-listener" {
-  load_balancer_arn = aws_alb.alb_nginx.arn
-  port              = "443"
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-2016-08"
-
-  default_action {
-    target_group_arn = aws_alb_target_group.nginx_tg_http.arn
-    type             = "forward"
-  }
-}
-
 resource "aws_alb_listener" "http-listener" {
   load_balancer_arn = aws_alb.alb_nginx.arn
-  port              = "80"
-  protocol          = "HTTP"
+  port = "80"
+  protocol = "HTTP"
 
   default_action {
     target_group_arn = aws_alb_target_group.nginx_tg_http.arn
-    type             = "forward"
+    type = "forward"
   }
 }
 
@@ -63,12 +51,4 @@ resource "aws_alb_listener" "http-listener" {
 
 output "tg_arn" {
   value = aws_alb_target_group.nginx_tg_http.arn
-}
-
-output "alb_arn_suffic" {
-  value = aws_alb.alb_nginx.arn_suffix
-}
-
-output "tg_arn_suffix" {
-  value = aws_alb_target_group.nginx_tg_http.arn_suffix
 }

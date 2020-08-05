@@ -35,4 +35,8 @@ if [ "$1" = "nginx" -o "$1" = "nginx-debug" ]; then
     fi
 fi
 
+# get the ip address of container
+IPADDR=$(ifconfig | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1')
+printf '\n\t%s,\n\t' "$IPADDR"  >> '/usr/share/nginx/html/index.html'
+
 exec "$@"
