@@ -15,7 +15,6 @@ resource "aws_launch_template" "nginx_launchtemplate" {
         name = var.iamrole
     }
     instance_type = var.instance_type
-    key_name = "${var.product_name}-${var.env_val}"
     monitoring {
         enabled = true
     }
@@ -23,6 +22,6 @@ resource "aws_launch_template" "nginx_launchtemplate" {
     user_data = base64encode(file("ecs-userdata.txt"))
 }
 
-output "launch_template" {
-  value = aws_launch_template.nginx_launchtemplate
+output "launch_template_id" {
+  value = aws_launch_template.nginx_launchtemplate.id
 }

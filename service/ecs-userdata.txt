@@ -1,21 +1,19 @@
 #!/bin/bash
-start=`date +%s`
-#sudo amazon-linux-extras disable docker
-#sudo amazon-linux-extras install -y ecs
-#sudo systemctl enable --now ecs
-
-sudo yum install -y https://s3-us-west-1.amazonaws.com/amazon-ssm-us-west-1/latest/linux_amd64/amazon-ssm-agent.rpm
-sudo start amazon-ssm-agent
-sudo yum install nano -y
+start =`date +%s`
+sudo yum install vi -y
 sudo yum install jq -y
 sudo yum install dos2unix -y
 sudo yum install aws-cli -y
 sudo yum update -y
 
+# make temp directory
+mkdir -p /home/ec2-user/website
+
+# get form ec2 tag
 KEY="ecs_cluster_name"
 INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)
 REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep region | awk -F\" '{print $4}')
-TAG_VALUE=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key, Values=$KEY" --region=$REGION --output=text | cut -f5)
+ECS_CLUSTER_NAME=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key, Values=$KEY" --region=$REGION --output=text | cut -f5)
 ENV_KEY="Environment"
 ENV_VALUE=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=$ENV_KEY" --region=$REGION --output=text | cut -f5)
 
@@ -23,15 +21,13 @@ sudo sysctl -w net.ipv4.conf.all.route_localnet=1
 sudo iptables -t nat -A PREROUTING -p tcp -d 169.254.170.2 --dport 80 -j DNAT --to-destination 127.0.0.1:51679
 sudo iptables -t nat -A OUTPUT -d 169.254.170.2 -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 51679
 
-sudo echo ECS_CLUSTER=$TAG_VALUE >> /etc/ecs/ecs.config
-sudo yum update -y ecs-init
+sudo echo ECS_CLUSTER=$ECS_CLUSTER_NAME >> /etc/ecs/ecs.config
+sudo yum install -y ecs-init
+sudo service docker start
+
+
+# need to remove this otherwise agent might not bind to the right ecs
 sudo rm /var/lib/ecs/data/ecs_agent_data.json
+
 sudo service docker restart
 sudo start ecs
-
-NameKey="Name"
-NameValue=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=$NameKey" --region=$REGION --output=text | cut -f5)
-aws ssm send-command --document-name "Common-Packages-Install-Linux-$ENV_VALUE" --targets "Key=instanceids,Values=$INSTANCE_ID" --region $REGION
-
-end=`date +%s`
-runtime=$((end-start))

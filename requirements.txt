@@ -1,9 +1,4 @@
 docker
 python-terraform
 boto3
-shutil
-isort
-tox
-pytest
-pylint
-mypy
+jmespath

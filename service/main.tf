@@ -1,3 +1,4 @@
+# defaulting to us-east-1
 provider "aws" {
     region = "us-east-1"
     profile = var.profile
@@ -40,9 +41,7 @@ module "asg-ecs" {
     product_name = local.product_name
 
     # alb
-    tgarn = module.alb.tg_arn
-    tgarn_suffix = module.alb.tg_arn_suffix
-    albarn_suffix = module.alb.alb_arn_suffic
+    tg_arn = module.alb.tg_arn
 
     # ecs
     ecs_desired = 1
@@ -56,10 +55,12 @@ module "asg-ecs" {
     ec2_desired = 1
     ec2_min = 1
     ec2_max = 2
-    instance_role = module.iam.iam_ec2_instance_arn
+    instance_role = module.iam.iam_ec2_instance
+    instance_role_profile = module.iam.iam_ec2_instance_profile
     amiid_linux = var.amiid_linux
 
     # network
     vpc_id = module.network.vpc_id
-    sg_id = module.network.public_subnet_ids
+    sg_id = module.network.sg_dmz_id
+    subnets_public = module.network.public_subnet_ids
 }

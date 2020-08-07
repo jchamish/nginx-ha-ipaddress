@@ -1,4 +1,4 @@
-FROM alpine:3.11
+FROM alpine:3.10
 
 ENV NGINX_VERSION 1.19.1
 ENV NJS_VERSION   0.4.2
@@ -108,6 +108,8 @@ RUN set -x \
 COPY docker-entrypoint.sh /
 COPY listen-on-ipv6-by-default.sh /docker-entrypoint.d
 COPY envsubst-on-templates.sh /docker-entrypoint.d
+COPY index.html /usr/share/nginx/html/
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
 EXPOSE 80
